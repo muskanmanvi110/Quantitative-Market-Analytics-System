@@ -8,3 +8,4 @@ statsmodels
 arch
 matplotlib
 groq
+python-dotenv
