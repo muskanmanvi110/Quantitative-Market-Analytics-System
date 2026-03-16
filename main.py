@@ -160,29 +160,6 @@ def calculate_var(price_paths, confidence=95):
     var = np.percentile(returns, 100 - confidence)
     return var
 
-# ------------------------------
-# Performance Metrics for Backtest
-# ------------------------------
-def calculate_performance_metrics(strategy_returns, market_returns):
-    """Calculate key performance metrics for a strategy vs. benchmark"""
-    total_strategy_return = (strategy_returns.iloc[-1] / strategy_returns.iloc[0]) - 1
-    total_market_return = (market_returns.iloc[-1] / market_returns.iloc[0]) - 1
-    n_years = len(strategy_returns) / 252
-    ann_strategy_return = (1 + total_strategy_return) ** (1 / n_years) - 1
-    ann_market_return = (1 + total_market_return) ** (1 / n_years) - 1
-    strategy_vol = np.std(strategy_returns.pct_change().dropna()) * np.sqrt(252)
-    market_vol = np.std(market_returns.pct_change().dropna()) * np.sqrt(252)
-    strategy_sharpe = ann_strategy_return / strategy_vol if strategy_vol > 0 else 0
-    market_sharpe = ann_market_return / market_vol if market_vol > 0 else 0
-    strategy_dd = (strategy_returns / strategy_returns.cummax() - 1).min()
-    market_dd = (market_returns / market_returns.cummax() - 1).min()
-    return {
-        "Total Return": [total_strategy_return, total_market_return],
-        "Annualized Return": [ann_strategy_return, ann_market_return],
-        "Annualized Volatility": [strategy_vol, market_vol],
-        "Sharpe Ratio": [strategy_sharpe, market_sharpe],
-        "Maximum Drawdown": [strategy_dd, market_dd]
-    }
 
 # ------------------------------
 # Helper Function to Adjust yfinance Data Format
@@ -195,7 +172,7 @@ def adjust_yf_data(data):
 # ------------------------------
 # Tabs: Unified Analysis
 # ------------------------------
-tabs = st.tabs(["Option Pricing", "GARCH & Backtesting", "Integrated Analysis & AI"])
+tabs = st.tabs(["Option Pricing", "GARCH", "Integrated Analysis & AI"])
 current_date = pd.Timestamp.today().normalize()
 
 # ==============================
@@ -268,12 +245,12 @@ with tabs[0]:
 ticker_sym = "AAPL"
 
 # ==============================
-# Tab 2: GARCH & Backtesting
+# Tab 2: GARCH
 # ==============================
 with tabs[1]:
-    st.header("GARCH Model & Backtesting")
-    st.write("Forecast volatility on historical returns using a GARCH(1,1) model and backtest a simple trading strategy based on volatility forecasts.")
-    ticker_garch = st.text_input("Ticker Symbol for GARCH & Backtesting", value="AAPL", max_chars=10, key="ticker_garch").upper()
+    st.header("GARCH Model")
+    st.write("Forecast volatility on historical returns using a GARCH(1,1) model.")
+    ticker_garch = st.text_input("Ticker Symbol for GARCH", value="AAPL", max_chars=10, key="ticker_garch").upper()
     start_date = st.date_input("Start Date", value=pd.to_datetime("2018-01-01"))
     end_date = st.date_input("End Date", value=pd.to_datetime("today"))
     data = yf.download(ticker_garch, start=start_date, end=end_date, auto_adjust=False)
@@ -337,98 +314,7 @@ with tabs[1]:
             {"Higher volatility periods may offer better option-selling opportunities but require smaller position sizes for directional trades." if recent_vol > avg_vol else "Lower volatility periods may be better for building directional positions but offer less premium for option sellers."}
             """)
             st.write(explanation)
-        # Strategy Backtest
-        st.subheader("Trading Strategy Backtest")
-        st.write("This strategy goes long when forecasted volatility is below its median and stays out of the market when volatility is high.")
-        window = st.slider("Rolling Window Size (trading days)", min_value=60, max_value=500, value=250, step=10)
-        with st.spinner("Running backtest..."):
-            forecasts = []
-            for i in range(window, len(data)):
-                train = data['Return'].iloc[i-window:i] * 100
-                model = arch_model(train, vol='Garch', p=1, q=1, dist='Normal')
-                model_res = model.fit(disp="off")
-                fcast = model_res.forecast(horizon=1)
-                vol_forecast = np.sqrt(fcast.variance.values[-1, 0])
-                forecasts.append(vol_forecast)
-            forecast_index = data.index[window:]
-            forecast_series = pd.Series(forecasts, index=forecast_index)
-            median_vol = forecast_series.median()
-            data['Signal'] = 0
-            data.loc[forecast_series.index, 'Signal'] = (forecast_series < median_vol).astype(int)
-            data['Strategy Return'] = data['Signal'].shift(1) * data['Return']
-            data['Cumulative Strategy'] = (1 + data['Strategy Return']).cumprod()
-            data['Cumulative BuyHold'] = (1 + data['Return']).cumprod()
-            backtest_data = data.loc[forecast_index]
-            fig_backtest = px.line(backtest_data, x=backtest_data.index, 
-                                  y=['Cumulative Strategy', 'Cumulative BuyHold'],
-                                  labels={'value': 'Cumulative Return', 'variable': 'Strategy'},
-                                  title=f"Volatility-Based Strategy vs Buy-and-Hold for {ticker_garch}")
-            fig_backtest.update_layout(legend_title_text='Strategy')
-            st.plotly_chart(fig_backtest, use_container_width=True)
-            metrics = calculate_performance_metrics(
-                backtest_data['Cumulative Strategy'], 
-                backtest_data['Cumulative BuyHold']
-            )
-            metrics_df = pd.DataFrame(metrics, index=['Strategy', 'Buy & Hold'])
-            formatted_metrics = metrics_df.copy()
-            for col in ['Total Return', 'Annualized Return', 'Annualized Volatility', 'Maximum Drawdown']:
-                formatted_metrics[col] = formatted_metrics[col].map('{:.2%}'.format)
-            formatted_metrics['Sharpe Ratio'] = formatted_metrics['Sharpe Ratio'].map('{:.2f}'.format)
-            st.table(formatted_metrics)
-            strategy_return = metrics['Total Return'][0]
-            market_return = metrics['Total Return'][1]
-            strategy_sharpe = metrics['Sharpe Ratio'][0]
-            market_sharpe = metrics['Sharpe Ratio'][1]
-            if strategy_return > market_return and strategy_sharpe > market_sharpe:
-                performance = "good"
-                message = "The volatility-based strategy outperformed the market on both return and risk-adjusted basis."
-            elif strategy_return > market_return:
-                performance = "neutral"
-                message = "The strategy generated higher returns but with higher risk."
-            elif strategy_sharpe > market_sharpe:
-                performance = "neutral"
-                message = "The strategy had better risk-adjusted returns but underperformed on absolute returns."
-            else:
-                performance = "bad"
-                message = "The volatility-based strategy underperformed the market on both metrics."
-            st.markdown(f'<div class="strategy-{performance}">{message}</div>', unsafe_allow_html=True)
-        if st.button("Explain Strategy & Results", key="explain_strategy"):
-            if 'backtest_data' in locals():
-                strategy_final = backtest_data['Cumulative Strategy'].iloc[-1]
-                market_final = backtest_data['Cumulative BuyHold'].iloc[-1]
-                win_rate = (backtest_data['Strategy Return'] > 0).mean()
-                max_up = backtest_data['Strategy Return'].max()
-                max_down = backtest_data['Strategy Return'].min()
-                explanation = ai_explainer.explain(f"""
-                This strategy trades {ticker_garch} based on expected volatility:
-                - When volatility forecast is LOW (below median), the strategy BUYS the stock
-                - When volatility forecast is HIGH (above median), the strategy STAYS OUT of the market
-                The logic: Stocks typically offer better risk-adjusted returns during low-volatility periods.
-                Results:
-                - $10,000 in this strategy would now be worth ${10000*strategy_final:.2f} vs ${10000*market_final:.2f} for buy-and-hold
-                - Win rate: {win_rate:.1%} of trading days were profitable
-                - Best daily gain: {max_up:.2%}
-                - Worst daily loss: {max_down:.2%}
-                What this means for investors:
-                {"This strategy successfully filtered out high-volatility periods that typically offer poor risk-adjusted returns." if strategy_sharpe > market_sharpe else "This strategy wasn't effective at timing the market based on volatility forecasts for this particular stock."}
-                {"Consider using volatility forecasts as part of your risk management system." if strategy_sharpe > market_sharpe else "For this stock, a simple buy-and-hold approach has been more effective than trying to time based on volatility."}
-                """)
-            else:
-                explanation = ai_explainer.explain(f"""
-                This strategy would trade {ticker_garch} based on expected volatility:
-                - When volatility forecast is LOW (below median), the strategy would BUY the stock
-                - When volatility forecast is HIGH (above median), the strategy would STAY OUT of the market
-                The logic: Stocks typically offer better risk-adjusted returns during low-volatility periods.
-                Please run the backtest to see the specific performance results for this stock.
-                """)
-            st.write(explanation)
-        if 'backtest_data' in locals():
-            backtest_download = backtest_data[['Return', 'Signal', 'Strategy Return', 
-                                             'Cumulative Strategy', 'Cumulative BuyHold']].copy()
-            st.download_button("Download Backtest Results", 
-                              backtest_download.to_csv(index=True), 
-                              "garch_backtest_results.csv", 
-                              "text/csv")
+
 
 # ==============================
 # Tab 3: Integrated Analysis & AI Explanations
