@@ -4,9 +4,7 @@ import numpy as np
 from scipy.stats import norm
 from numpy import log, sqrt, exp
 import yfinance as yf
-from datetime import timedelta
 from scipy.optimize import brentq
-from scipy.interpolate import griddata
 import plotly.graph_objects as go
 import plotly.express as px
 from statsmodels.tsa.arima.model import ARIMA
@@ -197,7 +195,7 @@ def adjust_yf_data(data):
 # ------------------------------
 # Tabs: Unified Analysis
 # ------------------------------
-tabs = st.tabs(["Option Pricing", "Market Analysis", "GARCH & Backtesting", "Integrated Analysis & AI"])
+tabs = st.tabs(["Option Pricing", "GARCH & Backtesting", "Integrated Analysis & AI"])
 current_date = pd.Timestamp.today().normalize()
 
 # ==============================
@@ -266,117 +264,13 @@ with tabs[0]:
     })
     st.download_button("Download Option Prices", prices_df.to_csv(index=False), "option_prices.csv", "text/csv")
 
-# ==============================
-# Tab 2: Market Analysis (US Context)
-# ==============================
-with tabs[1]:
-    st.header("Market Analysis: Implied Volatility & Historical Data")
-    st.write("Retrieve live market data for US stocks to compute the implied volatility surface and display historical price trends.")
-    col_market = st.columns(3)
-    with col_market[0]:
-        ticker_sym = st.text_input("Ticker Symbol", value="AAPL", max_chars=10, key="ticker_market").upper()
-    with col_market[1]:
-        market_r = st.number_input("Risk-Free Rate", value=0.05, step=0.005, format="%.4f")
-    with col_market[2]:
-        div_yield = st.number_input("Dividend Yield", value=0.02, step=0.005, format="%.4f")
-    ticker_obj = yf.Ticker(ticker_sym)
-    try:
-        expirations = ticker_obj.options
-    except Exception as e:
-        st.error(f"Error fetching options for {ticker_sym}: {e}. Try another ticker (e.g., 'MSFT', 'GOOG').")
-        st.stop()
-    if not expirations:
-        st.error(f"No options data available for {ticker_sym}.")
-        st.stop()
-    exp_dates = [pd.Timestamp(exp) for exp in expirations if pd.Timestamp(exp) > current_date + timedelta(days=7)]
-    if not exp_dates:
-        st.error(f"No valid expiration dates found for {ticker_sym}.")
-    else:
-        options_list = []
-        for expiration_date in exp_dates:
-            try:
-                chain = ticker_obj.option_chain(expiration_date.strftime('%Y-%m-%d'))
-                calls = chain.calls
-            except Exception:
-                continue
-            calls = calls[(calls['bid'] > 0) & (calls['ask'] > 0)]
-            for _, row in calls.iterrows():
-                mid_price = (row['bid'] + row['ask']) / 2
-                options_list.append({
-                    "expiration": expiration_date,
-                    "strike": row["strike"],
-                    "mid": mid_price
-                })
-        if not options_list:
-            st.error("No option data available after filtering.")
-        else:
-            options_df = pd.DataFrame(options_list)
-            try:
-                hist = ticker_obj.history(period="5d", auto_adjust=False)
-                hist = adjust_yf_data(hist)
-                if hist.empty:
-                    st.error("No historical data available.")
-                    st.stop()
-                else:
-                    spot_price = hist["Close"].iloc[-1]
-            except Exception as e:
-                st.error(f"Error fetching historical data: {e}")
-                st.stop()
-            options_df["daysToExp"] = (options_df["expiration"] - current_date).dt.days
-            options_df["T"] = options_df["daysToExp"] / 365
-            options_df["ImplVol"] = options_df.apply(
-                lambda row: implied_volatility(row["mid"], spot_price, row["strike"], row["T"], market_r, div_yield),
-                axis=1
-            )
-            options_df = options_df.dropna(subset=["ImplVol"])
-            options_df["ImplVol"] *= 100  # Convert to percentage
-            X = options_df["T"].values
-            Y_vals = options_df["strike"].values
-            Z = options_df["ImplVol"].values
-            ti = np.linspace(X.min(), X.max(), 50)
-            yi = np.linspace(Y_vals.min(), Y_vals.max(), 50)
-            T_mesh, Y_mesh = np.meshgrid(ti, yi)
-            Zi = griddata((X, Y_vals), Z, (T_mesh, Y_mesh), method="linear")
-            Zi = np.ma.array(Zi, mask=np.isnan(Zi))
-            fig_surface = go.Figure(data=[go.Surface(
-                x=T_mesh, y=Y_mesh, z=Zi,
-                colorscale='Viridis',
-                colorbar=dict(title="Impl. Vol (%)")
-            )])
-            fig_surface.update_layout(
-                title=f"Implied Volatility Surface for {ticker_sym}",
-                scene=dict(
-                    xaxis_title="Time to Expiration (years)",
-                    yaxis_title="Strike Price (USD)",
-                    zaxis_title="Implied Volatility (%)"
-                ),
-                autosize=True,
-                margin=dict(l=65, r=50, b=65, t=90)
-            )
-            st.plotly_chart(fig_surface, use_container_width=True)
-            if st.button("Explain Volatility Surface", key="explain_vol_surface"):
-                explanation = ai_explainer.explain(f"""
-                The 3D volatility surface for {ticker_sym} shows how the market prices risk:
-                - The x-axis shows time to expiration (longer-dated options are further away)
-                - The y-axis shows different strike prices (higher strikes to the right)
-                - The z-axis (height and color) shows implied volatility percentage
-                The shape of this surface reveals market expectations:
-                - Slopes indicate expected directional movement
-                - "Smiles" or "smirks" (curves) show tail risk concerns
-                - Higher implied volatility means the market expects larger price movements
-                This is the market's forecast of future volatility based on real option prices.
-                """)
-                st.write(explanation)
-            st.subheader(f"Historical Prices for {ticker_sym}")
-            fig_hist = px.line(hist, x=hist.index, y="Close", title=f"{ticker_sym} Historical Close Prices",
-                               labels={"Close": "Price (USD)", "Date": "Date"})
-            st.plotly_chart(fig_hist, use_container_width=True)
-            st.download_button("Download Options Data", options_df.to_csv(index=False), "market_options.csv", "text/csv")
+# ticker_sym used in Integrated Analysis tab
+ticker_sym = "AAPL"
 
 # ==============================
-# Tab 3: GARCH & Backtesting
+# Tab 2: GARCH & Backtesting
 # ==============================
-with tabs[2]:
+with tabs[1]:
     st.header("GARCH Model & Backtesting")
     st.write("Forecast volatility on historical returns using a GARCH(1,1) model and backtest a simple trading strategy based on volatility forecasts.")
     ticker_garch = st.text_input("Ticker Symbol for GARCH & Backtesting", value="AAPL", max_chars=10, key="ticker_garch").upper()
@@ -537,9 +431,9 @@ with tabs[2]:
                               "text/csv")
 
 # ==============================
-# Tab 4: Integrated Analysis & AI Explanations
+# Tab 3: Integrated Analysis & AI Explanations
 # ==============================
-with tabs[3]:
+with tabs[2]:
     st.header("Integrated Analysis & AI Explanations")
     st.write("Unified analysis with AI-powered explanations for all visualizations and data.")
     
@@ -632,42 +526,7 @@ with tabs[3]:
     except Exception as e:
         st.error(f"Error in time series forecasting: {e}")
     
-    # Subsection: Volatility Clustering Analysis
-    st.subheader("Volatility Clustering Analysis")
-    try:
-        data_ts['Returns'] = data_ts['Adj Close'].pct_change().dropna()
-        data_ts['Abs Returns'] = abs(data_ts['Returns'])
-        data_ts['Rolling Vol'] = data_ts['Returns'].rolling(window=21).std() * np.sqrt(252)
-        
-        fig_vol = px.line(data_ts, y='Rolling Vol', title=f"21-Day Rolling Annualized Volatility for {ticker_sym}")
-        fig_vol.update_layout(yaxis_title="Annualized Volatility")
-        st.plotly_chart(fig_vol, use_container_width=True)
-        
-        # Plot autocorrelation of absolute returns
-        from statsmodels.graphics.tsaplots import plot_acf
-        import matplotlib.pyplot as plt
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        plot_acf(data_ts['Abs Returns'].dropna(), ax=ax, lags=30)
-        plt.title("Autocorrelation of Absolute Returns (Volatility Clustering)")
-        st.pyplot(fig)
-        
-        if st.button("Explain Volatility Analysis", key="explain_vol_analysis"):
-            current_vol = data_ts['Rolling Vol'].iloc[-1]
-            avg_vol = data_ts['Rolling Vol'].mean()
-            max_vol = data_ts['Rolling Vol'].max()
-            volatility_regime = "high" if current_vol > avg_vol else "low"
-            
-            explanation = ai_explainer.explain(
-                f"The volatility analysis for {ticker_sym} shows: "
-                f"1. Current volatility: {current_vol:.2%}, Average volatility: {avg_vol:.2%}, Maximum volatility: {max_vol:.2%}. "
-                f"The stock is currently in a {volatility_regime} volatility regime. "
-                "2. The autocorrelation chart confirms 'volatility clustering,' where high-volatility periods tend to persist, and calm periods also cluster together. "
-                "This insight is crucial for risk management and strategy development."
-            )
-            st.write(explanation)
-    except Exception as e:
-        st.error(f"Error in volatility clustering analysis: {e}")
+
 
 # ==============================
 # Footer
