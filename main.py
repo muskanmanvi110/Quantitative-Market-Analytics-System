@@ -66,7 +66,7 @@ class FinancialAI:
             {"role": "user", "content": f"Explain this in simple terms for non-technical users: {description}"}
         ]
         completion = client.chat.completions.create(
-            model="llama-3.1-8b-instant",  # Updated model name
+            model="llama-3.1-8b-instant",
             messages=messages,
             temperature=0.6,
             max_tokens=4096,
@@ -241,9 +241,6 @@ with tabs[0]:
     })
     st.download_button("Download Option Prices", prices_df.to_csv(index=False), "option_prices.csv", "text/csv")
 
-# ticker_sym used in Integrated Analysis tab
-ticker_sym = "AAPL"
-
 # ==============================
 # Tab 2: GARCH
 # ==============================
@@ -260,10 +257,8 @@ with tabs[1]:
     else:
         data['Return'] = data['Adj Close'].pct_change()
         data = data.dropna()
-        # Display historical returns and volatility
         fig_returns = px.line(data, x=data.index, y='Return', title=f"{ticker_garch} Daily Returns")
         st.plotly_chart(fig_returns, use_container_width=True)
-        # GARCH model fitting
         st.subheader("GARCH(1,1) Model Results")
         with st.spinner("Fitting GARCH model..."):
             am = arch_model(data['Return']*100, vol='Garch', p=1, q=1, dist='Normal')
@@ -276,7 +271,7 @@ with tabs[1]:
             col1.metric("Constant (ω)", f"{omega:.6f}")
             col2.metric("ARCH (α)", f"{alpha:.6f}")
             col3.metric("GARCH (β)", f"{beta:.6f}")
-            col4.metric("Persistence (α+β)", f"{persistence:.6f}", 
+            col4.metric("Persistence (α+β)", f"{persistence:.6f}",
                         delta_color="off" if 0.95 <= persistence <= 1 else ("normal" if persistence < 0.95 else "inverse"))
             with st.expander("View detailed GARCH model statistics"):
                 st.text(res.summary())
@@ -291,11 +286,10 @@ with tabs[1]:
             {"The model indicates volatility is very sensitive to market shocks." if alpha > 0.1 else "The model shows volatility is relatively stable against market shocks."}
             """)
             st.write(explanation)
-        # Forecasting
         st.subheader("Conditional Volatility")
         conditional_vol = res.conditional_volatility
         data['GARCH_Vol'] = conditional_vol / 100
-        fig_vol = px.line(data, x=data.index, y='GARCH_Vol', 
+        fig_vol = px.line(data, x=data.index, y='GARCH_Vol',
                            title=f"{ticker_garch} Conditional Volatility (GARCH)")
         fig_vol.update_yaxes(title="Annualized Volatility")
         st.plotly_chart(fig_vol, use_container_width=True)
@@ -322,18 +316,21 @@ with tabs[1]:
 with tabs[2]:
     st.header("Integrated Analysis & AI Explanations")
     st.write("Unified analysis with AI-powered explanations for all visualizations and data.")
-    
+
+    # --- FIX: Dynamic ticker input instead of hardcoded "AAPL" ---
+    ticker_sym = st.text_input("Ticker Symbol for Analysis", value="AAPL", max_chars=10, key="ticker_integrated").upper()
+
     # Subsection: Option Pricing Comparison
     st.subheader("Option Pricing Comparison")
     bs_call, bs_put = bs.calculate_prices()
     mc_call, mc_paths = monte_carlo_option_price(S, K, t, r, sigma)
-    
+
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Black-Scholes Call", f"${bs_call:.2f}")
     with col2:
         st.metric("Monte Carlo Call", f"${mc_call:.2f}")
-    
+
     if st.button("Explain Pricing Methods", key="explain_pricing_methods"):
         explanation = ai_explainer.explain(
             "The Black-Scholes model calculates option prices using a closed-form solution based on assumptions like constant volatility and no jumps in price. "
@@ -341,18 +338,18 @@ with tabs[2]:
             "While Black-Scholes is faster and simpler, Monte Carlo is more flexible and can handle complex scenarios like path-dependent options."
         )
         st.write(explanation)
-    
+
     # Subsection: Value at Risk (VaR) Calculation Using Monte Carlo
     st.subheader("Value at Risk (VaR) Calculation Using Monte Carlo")
     var_95 = calculate_var(mc_paths, confidence=95)
     var_99 = calculate_var(mc_paths, confidence=99)
-    
+
     col1, col2 = st.columns(2)
     with col1:
         st.metric("95% VaR", f"{var_95:.4f}")
     with col2:
         st.metric("99% VaR", f"{var_99:.4f}")
-    
+
     if st.button("Explain VaR", key="explain_var"):
         explanation = ai_explainer.explain(
             f"Value at Risk (VaR) measures the maximum potential loss over a specific time period with a given confidence level. "
@@ -360,7 +357,7 @@ with tabs[2]:
             f"The 99% VaR is {var_99:.4f}, indicating a 1% chance of exceeding this loss. VaR helps investors understand their risk exposure."
         )
         st.write(explanation)
-    
+
     # Subsection: Time Series Forecasting (ARIMA)
     st.subheader("Time Series Forecasting (ARIMA)")
     try:
@@ -370,12 +367,12 @@ with tabs[2]:
             model_arima = ARIMA(data_ts['Adj Close'], order=(1, 1, 1))
             model_fit = model_arima.fit()
             forecast = model_fit.forecast(steps=30)
-            
+
             forecast_dates = pd.date_range(start=data_ts.index[-1] + pd.Timedelta(days=1), periods=30, freq='B')
             forecast_df = pd.DataFrame({
                 'Forecast': forecast.values
             }, index=forecast_dates)
-            
+
             fig_forecast = go.Figure()
             fig_forecast.add_trace(go.Scatter(
                 x=data_ts.index, y=data_ts['Adj Close'],
@@ -394,13 +391,13 @@ with tabs[2]:
                 yaxis_title="Price (USD)"
             )
             st.plotly_chart(fig_forecast, use_container_width=True)
-            
+
             if st.button("Explain Forecast", key="explain_forecast"):
                 current_price = data_ts['Adj Close'].iloc[-1]
                 forecast_price = forecast.values[-1]
                 direction = "upward" if forecast_price > current_price else "downward"
                 percent_change = (forecast_price / current_price - 1) * 100
-                
+
                 explanation = ai_explainer.explain(
                     f"The ARIMA forecast predicts a {direction} trend for {ticker_sym} over the next 30 trading days. "
                     f"The current price is ${current_price:.2f}, and the forecasted price is ${forecast_price:.2f}, representing a {percent_change:.2f}% change. "
@@ -411,7 +408,6 @@ with tabs[2]:
             st.error("Insufficient data for forecasting.")
     except Exception as e:
         st.error(f"Error in time series forecasting: {e}")
-    
 
 
 # ==============================
